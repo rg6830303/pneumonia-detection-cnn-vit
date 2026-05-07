@@ -20,10 +20,73 @@ except ImportError:
     ADVANCED_AUG_AVAILABLE = False
 
 
+IMAGE_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff')
+SPLITS = ('train', 'val', 'test')
+
+
+def _list_image_paths(class_dir: str):
+    """Return sorted image paths from a class folder."""
+    if not os.path.isdir(class_dir):
+        return []
+    return [
+        os.path.join(class_dir, img_name)
+        for img_name in sorted(os.listdir(class_dir))
+        if img_name.lower().endswith(IMAGE_EXTENSIONS)
+    ]
+
+
+def _has_split_layout(root_dir: str) -> bool:
+    return all(
+        os.path.isdir(os.path.join(root_dir, split, class_name))
+        for split in SPLITS
+        for class_name in config.CLASS_NAMES
+    )
+
+
+def _has_flat_layout(root_dir: str) -> bool:
+    return all(
+        os.path.isdir(os.path.join(root_dir, class_name))
+        for class_name in config.CLASS_NAMES
+    )
+
+
+def _split_flat_paths(paths, split: str):
+    """Deterministically split a flat class folder into train/val/test paths."""
+    if split not in SPLITS:
+        raise ValueError(f"Invalid split: {split}. Choose from {SPLITS}")
+
+    paths = list(paths)
+    if not paths:
+        return []
+
+    ratios = getattr(
+        config,
+        'DATA_SPLIT_RATIOS',
+        {'train': 0.70, 'val': 0.15, 'test': 0.15},
+    )
+    rng = np.random.default_rng(getattr(config, 'RANDOM_SEED', 42))
+    indices = np.arange(len(paths))
+    rng.shuffle(indices)
+    shuffled = [paths[i] for i in indices]
+
+    train_end = int(len(shuffled) * ratios.get('train', 0.70))
+    val_end = train_end + int(len(shuffled) * ratios.get('val', 0.15))
+
+    if split == 'train':
+        return shuffled[:train_end]
+    if split == 'val':
+        return shuffled[train_end:val_end]
+    return shuffled[val_end:]
+
+
 class ChestXrayDataset(Dataset):
     """
     Custom Dataset for Chest X-ray images
-    Expects directory structure:
+    Supports either directory structure:
+    dataset/
+        NORMAL/
+        PNEUMONIA/
+    or:
     data/chest_xray/
         train/
             NORMAL/
@@ -55,32 +118,34 @@ class ChestXrayDataset(Dataset):
         if use_lung_mask and lung_segmenter is None:
             raise ValueError("lung_segmenter must be provided when use_lung_mask=True")
         
-        # Build file list
         self.image_paths = []
         self.labels = []
+
+        if not os.path.exists(root_dir):
+            raise ValueError(f"Dataset root {root_dir} does not exist.")
+
+        if _has_split_layout(root_dir):
+            split_dir = os.path.join(root_dir, split)
+            for label, class_name in enumerate(config.CLASS_NAMES):
+                class_dir = os.path.join(split_dir, class_name)
+                paths = _list_image_paths(class_dir)
+                self.image_paths.extend(paths)
+                self.labels.extend([label] * len(paths))
+            layout = 'split'
+        elif _has_flat_layout(root_dir):
+            for label, class_name in enumerate(config.CLASS_NAMES):
+                class_dir = os.path.join(root_dir, class_name)
+                paths = _split_flat_paths(_list_image_paths(class_dir), split)
+                self.image_paths.extend(paths)
+                self.labels.extend([label] * len(paths))
+            layout = 'flat'
+        else:
+            raise ValueError(
+                f"Dataset root {root_dir} must contain either train/val/test class folders "
+                f"or flat {config.CLASS_NAMES} class folders."
+            )
         
-        split_dir = os.path.join(root_dir, split)
-        
-        if not os.path.exists(split_dir):
-            raise ValueError(f"Directory {split_dir} does not exist. Please download the dataset first.")
-        
-        # Load NORMAL images (label = 0)
-        normal_dir = os.path.join(split_dir, 'NORMAL')
-        if os.path.exists(normal_dir):
-            for img_name in os.listdir(normal_dir):
-                if img_name.lower().endswith(('.png', '.jpg', '.jpeg')):
-                    self.image_paths.append(os.path.join(normal_dir, img_name))
-                    self.labels.append(0)
-        
-        # Load PNEUMONIA images (label = 1)
-        pneumonia_dir = os.path.join(split_dir, 'PNEUMONIA')
-        if os.path.exists(pneumonia_dir):
-            for img_name in os.listdir(pneumonia_dir):
-                if img_name.lower().endswith(('.png', '.jpg', '.jpeg')):
-                    self.image_paths.append(os.path.join(pneumonia_dir, img_name))
-                    self.labels.append(1)
-        
-        print(f"Loaded {len(self.image_paths)} images from {split} set")
+        print(f"Loaded {len(self.image_paths)} images from {split} set ({layout} layout)")
         print(f"  - NORMAL: {self.labels.count(0)}")
         print(f"  - PNEUMONIA: {self.labels.count(1)}")
     
@@ -274,7 +339,11 @@ if __name__ == "__main__":
     print(f"Expected data directory: {config.DATA_DIR}")
     print("\nPlease ensure the dataset is downloaded and extracted to:")
     print(f"  {config.DATA_DIR}")
-    print("\nDirectory structure should be:")
+    print("\nDirectory structure can be flat:")
+    print("  dataset/")
+    print("    NORMAL/")
+    print("    PNEUMONIA/")
+    print("\nOr pre-split:")
     print("  data/chest_xray/")
     print("    train/")
     print("      NORMAL/")

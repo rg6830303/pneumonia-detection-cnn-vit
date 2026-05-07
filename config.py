@@ -9,7 +9,7 @@ import os
 # PATHS
 # ============================================================================
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(PROJECT_ROOT, 'data', 'chest_xray')
+DATA_DIR = os.path.join(PROJECT_ROOT, 'dataset')
 RESULTS_DIR = os.path.join(PROJECT_ROOT, 'results')
 MODELS_DIR = os.path.join(PROJECT_ROOT, 'models')
 LOGS_DIR = os.path.join(PROJECT_ROOT, 'logs')
@@ -32,6 +32,14 @@ PERSISTENT_WORKERS = True  # Keep workers alive between epochs
 
 # Class names
 CLASS_NAMES = ['NORMAL', 'PNEUMONIA']
+
+# Used when DATA_DIR contains flat class folders:
+# dataset/NORMAL/*.jpeg and dataset/PNEUMONIA/*.jpeg
+DATA_SPLIT_RATIOS = {
+    'train': 0.70,
+    'val': 0.15,
+    'test': 0.15,
+}
 
 # ============================================================================
 # MODEL PARAMETERS
